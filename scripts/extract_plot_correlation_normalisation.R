@@ -2,27 +2,24 @@
 rm(list=ls())
 require(ggplot2)
 require(reshape2)
-source('~/github/CaptureC_Analysis/normalisation/capturec_normalisation.R')
-source('~/github/CaptureC_Analysis/normalisation/capturec_input.R')
+source('~/github/CaptureC_Analysis/functions/capturec_normalisation.R')
+source('~/github/CaptureC_Analysis/functions/capturec_input.R')
 # Find input files
 indir <- '~/differential/newCounts/'
 outdir <- '~/differential/factorPlots/'
 comp.file <- '~/differential/comparisons.txt'
+chr.file <- '~/differential/chr_sizes.txt'
+# Extract input file paths
 input.paths <- list.files(
   '~/differential/newCounts',
   pattern='_Rep\\dRep\\d.counts.txt',
   full.names=T)
-# Set chromosome sizes
-chr.sizes <- list(
-  'chr2L'=23513712,
-  'chr2R'=25286936,
-  'chr3L'=28110227,
-  'chr3R'=32079331,
-  'chr4'=1348131,
-  'chrX'=23542271)
+# Extract chromosome sizes
+chr.sizes <- read.table(chr.file, sep='\t', col.names=c('name', 'length'))
+chr.sizes <- split(chr.sizes$length, chr.sizes$name)
 # Create fits
 frequency.fits <- lapply(
-  input.paths,
+  input.paths[1:2],
   distance.decay.fit,
   min.dist=2000,
   bin.size=1000,
