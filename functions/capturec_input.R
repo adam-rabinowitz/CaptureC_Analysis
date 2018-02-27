@@ -21,13 +21,17 @@ zeroNA <- function(v) {
 ###############################################################################
 ## Read in count data
 ###############################################################################
-read.split.replicates <- function(path, intra.only) {
+read.split.replicates <- function(path, min.dist, intra.only) {
   # Check arguments
   if (class(intra.only) != 'logical') {
-    stop('intra.only argument must be logical')
-  }
-  # Read in data
-  data <- data.table::fread(path)
+    stop('intra.only argument must be logical')}
+  if (class(min.dist) != 'numeric') {
+    stop('min.dist argument must be numeric')}
+  if (min.dist < 0) {
+    stop('min.dist cannot be negatove')}
+  # Read in data and remove proximal reads
+  data <- data.table::fread(path, showProgress=F)
+  data <- data[abs(data$fragDist) >= min.dist,]
   # Remove intrachromosomal counts if requested
   if (intra.only) {
     data <- data[data$baitChr == data$fragChr,]
@@ -68,3 +72,22 @@ merge.bait.data <- function(x1, x2) {
   merged.df <- merged.df[order(merged.df$baitID, merged.df$fragID),]
   return(merged.df)
 }
+
+###############################################################################
+## Function to merge all baits in dataset
+###############################################################################
+merge.datasets <- function(d1, d2, cores) {
+  # Find common baits
+  baits <- union(names(d1), names(d2))
+  # Merge data for each bait
+  merged.data <- mclapply(
+    baits,
+    function(bait) {
+      merge.bait.data(d1[[bait]], d2[[bait]])},
+    mc.cores=cores)
+  return(merged.data)
+}
+  
+
+
+
