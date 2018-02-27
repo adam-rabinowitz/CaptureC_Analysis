@@ -118,7 +118,7 @@ distance.decay.fit <- function(
   path, min.dist, bin.size, k, chr.sizes, cores
 ) {
   # Read in data and check dataset
-  frag.data <- fread(path)
+  frag.data <- fread(path, showProgress=F)
   dataset <- unique(frag.data$dataset)
   if (length(dataset) != 1) {
     stop('multiple datasets found')}
@@ -148,40 +148,6 @@ distance.decay.fit <- function(
   # name and return fits
   names(fits) <- paste0(dataset, c('.Rep1', '.Rep2'))
   return(fits)
-}
-
-###############################################################################
-## Predict distance decay values
-###############################################################################
-predict.monospline <- function(mono.fit, x) {
-  # Generate prediction
-  predict <- mgcv::Predict.matrix(
-    mono.fit$smooth,
-    data.frame(x=x))%*%mono.fit$penalties
-  return(predict[,1])
-}
-
-###############################################################################
-## Extract normalisation factors
-###############################################################################
-calculate.normalisation <- function(mono.fits, x) {
-  # Calculate fits
-  fitted <- sapply(
-    mono.fits,
-    predict.monospline,
-    x=x)
-  colnames(fitted) <- names(mono.fits)
-  # Calculate normalisation factors
-  geo.mean <- exp(rowMeans(log(fitted)))
-  if (any(is.na(geo.mean))) {
-    stop('failure to calulcate normalisation')
-  }
-  factors <- fitted / geo.mean
-  # Create and return output
-  output <- list(
-    'fitted'=fitted,
-    'factors'=factors)
-  return(output)
 }
 
 
