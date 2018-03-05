@@ -6,11 +6,11 @@ source('~/github/CaptureC_Analysis/functions/capturec_input.R')
 source('~/github/CaptureC_Analysis/functions/capturec_differential.R')
 # Set and print parameters
 params <- list(
-  'indir' = '~/differential/newCounts/',
+  'indir' = '/g/furlong/project/37_Capture-C/data/diffinter/input/',
   'pattern' = '_Rep\\dRep\\d.counts.txt$',
-  'outdir' = '~/differential/deseq2Results/',
-  'comparisons' = '~/differential/comparisons.txt',
-  'chrfile' = '~/differential/chr_sizes.txt',
+  'outdir' = '/g/furlong/project/37_Capture-C/data/diffinter/results/',
+  'comparisons' = '/g/furlong/project/37_Capture-C/data/diffinter/comparisons.txt',
+  'chrfile' = '/g/furlong/project/37_Capture-C/data/diffinter/chr_sizes.txt',
   'mindist' = 2000,
   'binsize' = 1000,
   'k' = 20,
@@ -84,18 +84,35 @@ for (cmp.name in names(comparisons)) {
     input.counts[[cond1]],
     input.counts[[cond2]],
     cores=params$cores)
-  # Perform differential analysis
-  deseq.results <- mclapply(
+  # Perform differential analysis with fit
+  deseq.norm.results <- mclapply(
     merged.data,
     perform.deseq.analysis,
     fits=frequency.fits,
     mc.cores=params$cores)
   # Merge data and recalculate p-value
-  deseq.results <- rbindlist(deseq.results)
-  deseq.results$padj <- p.adjust(deseq.results$pvalue, method='fdr')
+  deseq.norm.results <- rbindlist(deseq.norm.results)
+  deseq.norm.results$padj <- p.adjust(deseq.norm.results$pvalue, method='fdr')
   # Save file
-  out.path <- file.path(params$outdir, paste0(cmp.name, '.deseq2_results.txt'))
+  norm.path <- file.path(
+    params$outdir,
+    paste0(cmp.name, '.deseq2_norm_results.txt'))
   write.table(
-    deseq.results, out.path, row.names=F, col.names=T, sep='\t', quote=F)
+    deseq.norm.results, norm.path, row.names=F, col.names=T, sep='\t', quote=F)
+  # Perform differential analysis without fit
+  deseq.raw.results <- mclapply(
+    merged.data,
+    perform.deseq.analysis,
+    fits=NULL,
+    mc.cores=params$cores)
+  # Merge data and recalculate p-value
+  deseq.raw.results <- rbindlist(deseq.raw.results)
+  deseq.raw.results$padj <- p.adjust(deseq.raw.results$pvalue, method='fdr')
+  # Save file
+  raw.path <- file.path(
+    params$outdir,
+    paste0(cmp.name, '.deseq2_raw_results.txt'))
+  write.table(
+    deseq.raw.results, raw.path, row.names=F, col.names=T, sep='\t', quote=F)
 }
 
