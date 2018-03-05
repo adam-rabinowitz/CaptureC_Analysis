@@ -122,11 +122,13 @@ perform.deseq.analysis <- function(x, fits) {
     colData=sample.data,
     design=~sample)
   S4Vectors::metadata(dds)$distances <- distances
-  # Generate normalisation and perform analysis
-  normMatrix <- calculate.normalisation(
-    fits[colnames(dds)], distances)$factors
-  # Perform DESeq2 analaysis
-  dds <- DESeq2::estimateSizeFactors(dds, normMatrix=normMatrix)
+  # Perform distance decay normalisation if fits supplied
+  if (!is.null(fits)) {
+    normMatrix <- calculate.normalisation(
+      fits[colnames(dds)], distances)$factors
+    dds <- DESeq2::estimateSizeFactors(dds, normMatrix=normMatrix)
+  }
+  # Perform DESeq2 analysis
   dds <- DESeq2::DESeq(dds, fitType='local', betaPrior=T)
   results <- DESeq2::results(dds)
   # Format output
