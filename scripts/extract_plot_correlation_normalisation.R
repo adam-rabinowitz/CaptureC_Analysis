@@ -2,11 +2,12 @@
 rm(list=ls())
 require(ggplot2)
 require(reshape2)
-source('~/github/CaptureC_Analysis/functions/capturec_normalisation.R')
-source('~/github/CaptureC_Analysis/functions/capturec_input.R')
+source('/g/furlong/adamr/github/CaptureC_Analysis/functions/capturec_normalisation.R')
+source('/g/furlong/adamr/github/CaptureC_Analysis/functions/capturec_input.R')
+source('~/github/CaptureC_Analysis/functions/capturec_differential.R')
 # Find input files
 indir <- '~/differential/newCounts/'
-outdir <- '~/differential/factorPlots/'
+outdir <- '~/Desktop/LabMeeting/'
 comp.file <- '~/differential/comparisons.txt'
 chr.file <- '~/differential/chr_sizes.txt'
 # Extract input file paths
@@ -19,7 +20,7 @@ chr.sizes <- read.table(chr.file, sep='\t', col.names=c('name', 'length'))
 chr.sizes <- split(chr.sizes$length, chr.sizes$name)
 # Create fits
 frequency.fits <- lapply(
-  input.paths[1:2],
+  input.paths,
   distance.decay.fit,
   min.dist=2000,
   bin.size=1000,
@@ -131,18 +132,41 @@ correlation.metrics <- lapply(
       comp,
       calculate.normalisation.correlation)})
 correlation.metrics <- rbindlist(do.call(c, correlation.metrics))
+correlation.metrics$time <- as.character(
+  grepl('6-8h', correlation.metrics$cond1) +
+  grepl('6-8h', correlation.metrics$cond2))
+correlation.metrics$time <- gsub('^0$', '10-12h',  correlation.metrics$time)
+correlation.metrics$time <- gsub('^1$', '6-8h/10-12h',  correlation.metrics$time)
+correlation.metrics$time <- gsub('^2$', '6-8h',  correlation.metrics$time)
+correlation.metrics$time <- factor(correlation.metrics$time, levels=c('6-8h', '10-12h', '6-8h/10-12h'))
+correlation.metrics$class <- gsub('intra.replicate', 'replicate', correlation.metrics$class)
+correlation.metrics$class <- gsub('inter.replicate', 'condition', correlation.metrics$class)
+correlation.metrics$class <- factor(correlation.metrics$class, levels=c('replicate', 'condition'))
 correlation.metrics$norm <- factor(
   correlation.metrics$norm,
   levels=c('raw', 'normalised'))
-correlation.metrics$class <- factor(
-  correlation.metrics$class,
-  levels=c('intra.replicate', 'inter.replicate'))
-pdf(file.path(outdir, 'count_correlation.pdf'), height=7, width=10)
+pdf(file.path(outdir, 'raw_count_correlation.pdf'), height=4, width=4)
+ggplot(correlation.metrics[correlation.metrics$norm == 'raw',], aes(x=class, y=correlation, fill=norm)) +
+  geom_violin(draw_quantiles=c(0.25,0.5,0.75)) +
+  scale_y_continuous(limits=c(0.25, 1))
+dev.off()
+pdf(file.path(outdir, 'raw_count_correlation_time.pdf'), height=4, width=8)
+ggplot(correlation.metrics[correlation.metrics$norm == 'raw',], aes(x=class, y=correlation, fill=norm)) +
+  geom_violin(draw_quantiles=c(0.25,0.5,0.75)) +
+  scale_y_continuous(limits=c(0.25, 1)) +
+  facet_wrap(~time)
+dev.off()
+pdf(file.path(outdir, 'count_correlation_time.pdf'), height=4, width=9)
 ggplot(correlation.metrics, aes(x=class, y=correlation, fill=norm)) +
   geom_violin(draw_quantiles=c(0.25,0.5,0.75)) +
-  labs(title='Effect Of Normalisation On Count Correlation')
+  facet_wrap(~time) +
+  scale_y_continuous(limits=c(0.25, 1))
 dev.off()
-
+pdf(file.path(outdir, 'count_correlation.pdf'), height=4, width=6)
+ggplot(correlation.metrics, aes(x=class, y=correlation, fill=norm)) +
+  geom_violin(draw_quantiles=c(0.25,0.5,0.75)) +
+  scale_y_continuous(limits=c(0.25, 1))
+dev.off()
 
 
 
