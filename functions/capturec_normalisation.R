@@ -112,18 +112,12 @@ distance.decay.monospline <- function(x, y, limits, k) {
 }
 
 ##############################################################################
-## Calculates fits for given dataset
+## Create fit for series of baits
 ##############################################################################
-distance.decay.fit <- function(
-  path, min.dist, bin.size, k, chr.sizes, cores
+create.decay.fit <- function(
+  bait.list, min.dist, bin.size, k, chr.sizes, cores
 ) {
-  # Read in data and check dataset
-  frag.data <- fread(path, showProgress=F)
-  dataset <- unique(frag.data$dataset)
-  if (length(dataset) != 1) {
-    stop('multiple datasets found')}
-  # Extract proabilites for each bait
-  bait.list <- split(frag.data, frag.data$baitID)
+  # Calculate frequency for bins
   frequency.list <- mclapply(
     bait.list,
     bait.distance.frequency,
@@ -131,7 +125,7 @@ distance.decay.fit <- function(
     bin.size=bin.size,
     chr.sizes=chr.sizes,
     mc.cores=cores)
-  # Merge data and convert to dataframe
+  # Merge frequency data and convert to dataframe
   frequency.data <- apply(simplify2array(frequency.list), c(1,2), mean, na.rm=T)
   frequency.data <- as.data.frame(frequency.data)
   # Extract data for fit
@@ -145,6 +139,31 @@ distance.decay.fit <- function(
     limits=xlimits,
     k=k,
     mc.cores=min(cores, 2))
+  # name and return fits
+  return(fits)
+}
+
+##############################################################################
+## Calculates fits for given dataset
+##############################################################################
+distance.decay.fit <- function(
+  path, min.dist, bin.size, k, chr.sizes, cores
+) {
+  # Read in data and check dataset
+  frag.data <- fread(path, showProgress=F)
+  dataset <- unique(frag.data$dataset)
+  if (length(dataset) != 1) {
+    stop('multiple datasets found')}
+  # Extract proabilites for each bait
+  bait.list <- split(frag.data, frag.data$baitID)
+  fits <- create.decay.fit(
+    bait.list=bait.list,
+    min.dist=min.dist,
+    bin.size-bin.size,
+    k=k,
+    chr.sizes=chr.sizes,
+    cores=cores
+  )
   # name and return fits
   names(fits) <- paste0(dataset, c('.Rep1', '.Rep2'))
   return(fits)
