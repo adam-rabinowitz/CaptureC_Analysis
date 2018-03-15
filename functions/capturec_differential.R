@@ -111,11 +111,15 @@ format.deseq.output <- function(x, results) {
 ###############################################################################
 ## Generate count filter
 ###############################################################################
-perform.deseq.analysis <- function(x, fits) {
+perform.deseq.analysis <- function(x, fits, min.sum) {
   # Extract counts
-  sample.data <- gen.sample.data(x)
   counts <- gen.frag.counts(x)
+  passed <- rowSums(counts) >= min.sum
+  counts <- counts[passed,]
+  # Extract additional data
+  sample.data <- gen.sample.data(x)
   distances <- gen.frag.distances(x)
+  distances <- distances[passed]
   # Create DESeq2 object and add metadata
   dds <- DESeq2::DESeqDataSetFromMatrix(
     countData=counts,
@@ -126,14 +130,17 @@ perform.deseq.analysis <- function(x, fits) {
   if (!is.null(fits)) {
     normMatrix <- calculate.normalisation(
       fits[colnames(dds)], distances)$factors
-    dds <- DESeq2::estimateSizeFactors(dds, normMatrix=normMatrix)
+  } else {
+    normMatrix <- matrix(1, nrow=nrow(counts), ncol=ncol(counts))
+    colnames(normMatrix) <- colnames(counts)
   }
   # Perform DESeq2 analysis
+  dds <- estimateSizeFactors(dds, normMatrix=normMatrix)
   dds <- DESeq2::DESeq(dds, fitType='local', betaPrior=T)
   results <- DESeq2::results(dds)
   # Format output
   output <- format.deseq.output(
-    x=x,
+    x=x[passed,],
     results=results)
   return(output)
 }
