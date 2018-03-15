@@ -1,9 +1,9 @@
 # Script to generate distance-decay plots for replicates of all samples
 rm(list=ls())
 require('parallel')
-source('~/github/CaptureC_Analysis/functions/capturec_normalisation.R')
-source('~/github/CaptureC_Analysis/functions/capturec_input.R')
-source('~/github/CaptureC_Analysis/functions/capturec_differential.R')
+source('/g/furlong/adamr/github/CaptureC_Analysis/functions/capturec_normalisation.R')
+source('/g/furlong/adamr/github/CaptureC_Analysis/functions/capturec_input.R')
+source('/g/furlong/adamr/github/CaptureC_Analysis/functions/capturec_differential.R')
 # Set and print parameters
 params <- list(
   'indir' = '/g/furlong/project/37_Capture-C/data/diffinter/input/',
@@ -14,7 +14,8 @@ params <- list(
   'mindist' = 2000,
   'binsize' = 1000,
   'k' = 20,
-  'cores' = 6)
+  'minsum' = 4,
+  'cores' = 8)
 cat('Parameters:\n')
 for (p in names(params)) {
   cat(paste0('\t', p, ' : ', params[[p]], '\n'))}
@@ -89,6 +90,7 @@ for (cmp.name in names(comparisons)) {
     merged.data,
     perform.deseq.analysis,
     fits=frequency.fits,
+    min.sum=params$minsum,
     mc.cores=params$cores)
   # Merge data and recalculate p-value
   deseq.norm.results <- rbindlist(deseq.norm.results)
@@ -104,6 +106,7 @@ for (cmp.name in names(comparisons)) {
     merged.data,
     perform.deseq.analysis,
     fits=NULL,
+    min.sum=params$minsum,
     mc.cores=params$cores)
   # Merge data and recalculate p-value
   deseq.raw.results <- rbindlist(deseq.raw.results)
