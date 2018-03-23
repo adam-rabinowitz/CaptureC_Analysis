@@ -40,7 +40,7 @@ bait.distance.frequency <- function(
   bait.chr.length <- chr.sizes[[bait.chr]]
   # Create distance breaks
   max.dist <- max(unlist(chr.sizes)) + 1
-  length.out <- ((max.dist - min.dist) / bin.size) + 1 
+  length.out <- ((max.dist - min.dist) / bin.size) + 1
   dist.breaks <- seq(from=min.dist, by=bin.size, length.out=length.out)
   if (tail(dist.breaks, 1) < max.dist) {
     stop('error in generating breaks')}
@@ -54,7 +54,8 @@ bait.distance.frequency <- function(
   # Set intrachromosomal NA counts to zero
   intra.filter <- matrix(
     rep(dist.df$binStart < bait.chr.length, times=4),
-    ncol=4)
+    ncol=4
+  )
   dist.df[is.na(dist.df) & intra.filter] <- 0
   # Calculate and add background
   background <- bait.interchr.background(bait.data, chr.sizes)
@@ -159,16 +160,20 @@ distance.decay.fit <- function(
   fits <- create.decay.fit(
     bait.list=bait.list,
     min.dist=min.dist,
-    bin.size-bin.size,
+    bin.size=bin.size,
     k=k,
     chr.sizes=chr.sizes,
     cores=cores
   )
   # name and return fits
-  names(fits) <- paste0(dataset, c('.Rep1', '.Rep2'))
+  replicates <- gsub('^.*?Rep(\\d)Rep(\\d).*?$', '\\1.\\2', basename(path))
+  names(fits) <- paste0(
+    dataset,
+    '.Rep',
+    unlist(strsplit(replicates, '\\.'))
+  )
   return(fits)
 }
-
 
 
 
