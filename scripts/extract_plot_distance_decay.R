@@ -2,10 +2,10 @@
 rm(list=ls())
 require(ggplot2)
 require(reshape2)
-source('~/github/CaptureC_Analysis/normalisation/capturec_normalisation.R')
+source('~/github/CaptureC_Analysis/functions/capturec_normalisation.R')
 # Find input files
 indir <- '~/differential/newCounts/'
-outdir <- '~/differential/factorPlots/'
+outdir <- '~/Desktop/LabMeeting/'
 input.paths <- list.files(
   '~/differential/newCounts',
   pattern='_Rep\\dRep\\d.counts.txt',
@@ -59,21 +59,26 @@ for (fit.name in names(fitted.data)) {
 }
 plot.list <- list()
 y.lim <- c(min(fitted.plot$frequency), max(fitted.plot$frequency))
-plot.list[['combined']] <- ggplot(fitted.plot, aes(x=distance, y=frequency, col=replicate)) +
+pdf(file.path(outdir, 'combined_fit.pdf'), height=6, width=12)
+ggplot(fitted.plot, aes(x=distance, y=frequency, col=replicate)) +
   geom_line() +
   facet_wrap(~sample) +
   scale_x_log10() +
   scale_y_log10(limits=y.lim) +
   scale_color_manual(values=c('black', 'red', 'green')) +
   labs(title='All Samples')
+dev.off()
 for (sample in unique(fitted.plot$sample)) {
   subset.plot <- fitted.plot[fitted.plot$sample == sample,]
-  plot.list[[sample]] <- ggplot(subset.plot, aes(x=distance, y=frequency, colour=replicate)) +
+  plot <- ggplot(subset.plot, aes(x=distance, y=frequency, colour=replicate)) +
     geom_line() +
     scale_x_log10() +
     scale_y_log10(limits=y.lim) +
     labs(title=sample) +
     scale_color_manual(values=c('black', 'red', 'green'))
+  pdf(file.path(outdir, paste0(sample, '_distance_decay.pdf')), height=4, width=6)
+  print(plot)
+  dev.off()
 }
 # Save plots to file
 pdf <- pdf(

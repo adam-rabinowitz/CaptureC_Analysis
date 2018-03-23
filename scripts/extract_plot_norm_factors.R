@@ -2,10 +2,11 @@
 rm(list=ls())
 require(ggplot2)
 require(reshape2)
-source('~/github/CaptureC_Analysis/normalisation/capturec_normalisation.R')
+source('~/github/CaptureC_Analysis/functions/capturec_normalisation.R')
+source('~/github/CaptureC_Analysis/functions/capturec_differential.R')
 # Find input files
 indir <- '~/differential/newCounts/'
-outdir <- '~/differential/factorPlots/'
+outdir <- '~/Desktop/LabMeeting/'
 comp.file <- '~/differential/comparisons.txt'
 input.paths <- list.files(
   '~/differential/newCounts',
@@ -75,7 +76,19 @@ for (cmp.no in 1:nrow(comparisons)) {
 # Seperate out fit and pplot data
 plot.data <- do.call(c, plot.data)
 fitted.data <- rbindlist(plot.data[c(T,F)])
+fitted.data$time <- NA
+fitted.data$time[grepl('6-8h', fitted.data$comparison)] <- '6-8h'
+fitted.data$time[grepl('10-12h', fitted.data$comparison)] <- '10-12h'
+fitted.data$time[
+  grepl('6-8h', fitted.data$comparison) & 
+  grepl('10-12h', fitted.data$comparison)] <- '6-8h/10-12h'
 factor.data <- rbindlist(plot.data[c(F,T)])
+factor.data$time <- NA
+factor.data$time[grepl('6-8h', factor.data$comparison)] <- '6-8h'
+factor.data$time[grepl('10-12h', factor.data$comparison)] <- '10-12h'
+factor.data$time[
+  grepl('6-8h', factor.data$comparison) & 
+  grepl('10-12h', factor.data$comparison)] <- '6-8h/10-12h'
 # Create plots for comparison fits
 fit.y.lim <- c(min(fitted.data$value), max(fitted.data$value))
 fit.plots <- list()
@@ -108,7 +121,7 @@ factor.plots[['combined']] <- ggplot(factor.data, aes(x=distance, y=value, col=c
   scale_x_log10() +
   scale_y_log10(limits=factor.y.lim, breaks=factor.y.breaks) +
   scale_color_manual(values=c('brown1', 'brown3', 'dodgerblue1', 'dodgerblue3')) +
-  labs(title='All Comparisons', y='normalisation factors')
+  labs(title='All Comparisons', y='normalisation factor')
 for (comp in unique(factor.data$comparison)) {
   comp.data <- factor.data[factor.data$comparison == comp,]
   factor.plots[[comp]] <- ggplot(comp.data, aes(x=distance, y=value, col=sample)) +
@@ -116,8 +129,20 @@ for (comp in unique(factor.data$comparison)) {
     scale_x_log10() +
     scale_y_log10(limits=factor.y.lim, breaks=factor.y.breaks) +
     scale_color_manual(values=c('brown1', 'brown3', 'dodgerblue1', 'dodgerblue3')) +
-    labs(title=comp, y='probability')
+    labs(title=comp, y='normalisation factor')
 }
+pdf(file.path(outdir, 'example_distance_decay_comparison.pdf'), height=4, width=8)
+print(fit.plots[[2]])
+dev.off()
+pdf(file.path(outdir, 'all_distance_decay_comparison.pdf'), height=6, width=10)
+print(fit.plots[[1]])
+dev.off()
+pdf(file.path(outdir, 'example_distance_decay_factors.pdf'), height=4, width=8)
+print(factor.plots[[2]])
+dev.off()
+pdf(file.path(outdir, 'all_distance_decay_factors.pdf'), height=6, width=10)
+print(factor.plots[[1]])
+dev.off()
 pdf <- pdf(
   file.path(outdir, 'comparison_fit_plot.pdf'), height=7, width=10, onefile=T, )
   x <- lapply(fit.plots, print)
@@ -126,4 +151,68 @@ pdf <- pdf(
   file.path(outdir, 'comparison_factor_plot.pdf'), height=7, width=10, onefile=T, )
   x <- lapply(factor.plots, print)
 dev.off()
+f
+
+head(factor.data)
+
+
+ggplot(factor.data[factor.data$time == '6-8h',], aes(x=distance, y=value, col=condition)) +
+  geom_line() +
+  facet_wrap(~comparison) +
+  scale_x_log10() +
+  scale_y_log10(limits=factor.y.lim, breaks=factor.y.breaks) +
+  scale_color_manual(values=c('brown1', 'brown3', 'dodgerblue1', 'dodgerblue3')) +
+  labs(title='6-8h', y='normalisation factor')
+ggplot(factor.data[factor.data$time == '10-12h',], aes(x=distance, y=value, col=condition)) +
+  geom_line() +
+  facet_wrap(~comparison) +
+  scale_x_log10() +
+  scale_y_log10(limits=factor.y.lim, breaks=factor.y.breaks) +
+  scale_color_manual(values=c('brown1', 'brown3', 'dodgerblue1', 'dodgerblue3')) +
+  labs(title='10-12h', y='normalisation factor')
+pdf('')
+ggplot(factor.data[factor.data$time == '6-8h/10-12h',], aes(x=distance, y=value, col=condition)) +
+  geom_line() +
+  facet_wrap(~comparison) +
+  scale_x_log10() +
+  scale_y_log10(limits=factor.y.lim, breaks=factor.y.breaks) +
+  scale_color_manual(values=c('brown1', 'brown3', 'dodgerblue1', 'dodgerblue3')) +
+  labs(title='6-8h/10-12h', y='normalisation factor')
+pdf(file.path(outdir, '6-8h.distance_decay_fits.pdf'), height=4, width=8)
+ggplot(fitted.data[fitted.data$time == '6-8h',], aes(x=distance, y=value, col=condition)) +
+  geom_line() +
+  facet_wrap(~comparison) +
+  scale_x_log10() +
+  scale_y_log10(limits=fit.y.lim) +
+  scale_color_manual(values=c('brown1', 'brown3', 'dodgerblue1', 'dodgerblue3')) +
+  labs(title='6-8h', y='probability')
+dev.off()
+pdf(file.path(outdir, '10-12h.distance_decay_fits.pdf'), height=4, width=8)
+ggplot(fitted.data[fitted.data$time == '10-12h',], aes(x=distance, y=value, col=condition)) +
+  geom_line() +
+  facet_wrap(~comparison) +
+  scale_x_log10() +
+  scale_y_log10(limits=fit.y.lim) +
+  scale_color_manual(values=c('brown1', 'brown3', 'dodgerblue1', 'dodgerblue3')) +
+  labs(title='10-12h', y='probability')
+dev.off()
+pdf(file.path(outdir, '6-8h.10-12h.distance_decay_fits.pdf'), height=4, width=8)
+ggplot(fitted.data[fitted.data$time == '6-8h/10-12h',], aes(x=distance, y=value, col=condition)) +
+  geom_line() +
+  facet_wrap(~comparison) +
+  scale_x_log10() +
+  scale_y_log10(limits=fit.y.lim) +
+  scale_color_manual(values=c('brown1', 'brown3', 'dodgerblue1', 'dodgerblue3')) +
+  labs(title='6-8h/10-12h', y='probability')
+dev.off()
+
+
+
+
+
+
+
+
+
+
 
