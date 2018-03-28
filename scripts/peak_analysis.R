@@ -134,11 +134,11 @@ extract.bait.names <- function(path.list) {
 # Set parametrs
 params <- list(
   workdir='/g/furlong/project/37_Capture-C/data/diffinter',
-  indir='results/fragments/',
-  outdir='results/fragments/',
+  indir='all_replicate_results/fragments',
+  outdir='all_replicate_results/fragments',
   chicagoCRMdir='/g/furlong/project/37_Capture-C/analysis/TS_Capture/CRM_all',
   chicagoTSSdir='/g/furlong/project/37_Capture-C/analysis/TS_Capture/TSS_all',
-  chicago.pattern='_Rep1Rep2.Rds',
+  chicago.pattern='_Rep\\d+Rep\\d+.Rds',
   norm.pattern='.deseq2_norm_results.txt',
   raw.pattern='.deseq2_raw_results.txt',
   fragfile='/g/furlong/project/37_Capture-C/analysis/TS_Capture/CRM_all/design/dm6_DpnII.rmap',
@@ -220,19 +220,13 @@ for (norm in names(input.paths)) {
     sig.peaks <- rbind(sig.peaks, peaks)
   }
 }
-# Add bait names
-bait.names <- extract.bait.names(params[c('CRMbaits', 'TSSbaits')])
-sig.fragments$baitName <- bait.names[as.character(sig.fragments$baitID)]
-sig.fragments <- sig.fragments[,
-  c(1:2, ncol(sig.fragments), 3:(ncol(sig.fragments)-1))]
 # Save data
 write.table(
   sig.fragments, file.path(params$indir, 'significant_fragments.txt'),
   sep='\t', quote=F, row.names=F
 )
-
 # Format data for plotting
-sig.fragments$condition <- factor(
+sig.fragments$conditions <- factor(
   gsub('(CRM|TSS).', '', sig.fragments$comp),
   levels=c(
     '6-8h_DN.6-8h_elav',
@@ -246,30 +240,119 @@ sig.fragments$condition <- factor(
     '6-8h_Mef2.10-12h_Mef2'
   )
 )
+
+chicago.overlap <- data.frame(
+  'lfc' = c(1, 2, 1, 2),
+  'padj' = c(0.05, 0.05, 0.01, 0.01),
+  'count' = NA,
+  'specific' = NA
+)
+for (i in 1:nrow(chicago.overlap)) {
+  lfc <- chicago.overlap$lfc[i]
+  padj <- chicago.overlap$padj[i]
+  subset.sig.fragments <- sig.fragments[
+    sig.fragments$norm == 'norm' &
+    abs(sig.fragments$lfc) >= lfc &
+    sig.fragments$padj <= padj,]
+  chicago.overlap$count[i] <- nrow(subset.sig.fragments)
+  chicago.overlap$specific[i] <- sum(subset.sig.fragments$chicago == 'specific')
+}
+chicago.overlap$ratio <- chicago.overlap$specific / chicago.overlap$count
+ggplot(
+  chicago.overlap,
+  aes(x=as.character(padj), y=as.character(lfc), size=ratio)
+) +
+  geom_point() +
+  scale_size_continuous(
+    limits=c(0, max(chicago.overlap$ratio)),
+    range=c(1,20)
+  )
+
+
+
 sig.fragments$dhs <- factor(sig.fragments$dhs, levels=c('none', 'general', 'specific'))
 sig.fragments$chicago <- factor(sig.fragments$chicago, levels=c('none', 'general', 'specific'))
+
+# Calculate enrichment of specfic chicago overlaps in specific dhs overlaps
+phyper(
+  q=sum(sig.fragments$dhs == 'specific' & sig.fragments$chicago == 'specific'),
+  m=sum(sig.fragments$chicago == 'specific'),
+  n=length(sig.fragments$chicago) - sum(sig.fragments$chicago == 'specific'),
+  k=sum(sig.fragments$dhs == 'specific'),
+  lower.tail=F
+)
+print('all')
+print(nrow(sig.fragments))
+print('dhs.specific')
+print(sum(sig.fragments$dhs == 'specific'))
+print('chicago.specific')
+print(sum(sig.fragments$chicago == 'specific'))
+print('both.specific')
+print(sum(sig.fragments$chicago == 'specific' & sig.fragments$dhs == 'specific'))
 
 
 ###############################################################################
 ##
 ###############################################################################
 pdf('dhs_chicago_overlap.pdf', height=4, width=8, onefile=T)
+# Plot to display count of DHS overlaps for each comparison
 ggplot(
   sig.fragments,
-  aes(x=condition, fill=dhs)
+  aes(x=conditions, fill=dhs)
 ) +
   geom_bar() +
   coord_flip() +
+  scale_y_continuous(expand=c(0,0)) +
   facet_wrap(~gsub('(TSS|CRM).*', '\\1', comp) + norm) +
   labs(title='Effect Of Normalisation On DHS Overlap')
+# Plot to display ratio of DHS overlaps for each comparison
 ggplot(
   sig.fragments,
-  aes(x=condition, fill=chicago)
+  aes(x=conditions, fill=dhs)
+) +
+  geom_bar(position='fill') +
+  coord_flip() +
+  scale_y_continuous(expand=c(0,0)) +
+  facet_wrap(~gsub('(TSS|CRM).*', '\\1', comp) + norm) +
+  labs(title='Effect Of Normalisation On DHS Overlap')
+# Plot to display count of chicago overlaps for each comparison
+ggplot(
+  sig.fragments,
+  aes(x=conditions, fill=chicago)
 ) +
   geom_bar() +
   coord_flip() +
   facet_wrap(~gsub('(TSS|CRM).*', '\\1', comp) + norm) +
   labs(title='Effect Of Normalisation On Chicago Overlap')
+# Plot to display ratio of chicago overlaps for each comparison
+ggplot(
+  sig.fragments,
+  aes(x=conditions, fill=chicago)
+) +
+  geom_bar(position='fill') +
+  coord_flip() +
+  scale_y_continuous(expand=c(0,0)) +
+  facet_wrap(~gsub('(TSS|CRM).*', '\\1', comp) + norm) +
+  labs(title='Effect Of Normalisation On Chicago Overlap')
+# Plot to display count of chicago overlaps for none and specific DHS overlaps
+ggplot(
+  sig.fragments[sig.fragments$dhs != 'general' & sig.fragments$norm == 'norm',],
+  aes(x=conditions, fill=chicago)
+) +
+  geom_bar() +
+  coord_flip() +
+  facet_wrap(~dhs) +
+  labs(title='Effect Of DHS Overlap On Chicago Overlap')
+# Plot to display ratio of chicago overlaps for none and specific DHS overlaps
+ggplot(
+  sig.fragments[sig.fragments$dhs != 'general' & sig.fragments$norm == 'norm',],
+  aes(x=conditions, fill=chicago)
+) +
+  geom_bar(position='fill') +
+  coord_flip() +
+  scale_y_continuous(expand=c(0,0)) +
+  facet_wrap(~dhs) +
+  labs(title='Effect Of DHS Overlap On Chicago Overlap')
 dev.off()
 
 sig.peaks <- sig.peaks[sig.peaks$norm == 'norm',]
