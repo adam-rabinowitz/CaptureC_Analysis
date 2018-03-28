@@ -12,6 +12,8 @@ bait.interchr.background <- function(
   bait.chr <- unique(bait.data$baitChr)
   if (length(bait.chr) != 1) {
     stop('non-unique bait chromosome found')}
+  # Extract replicates
+  reps <- colnames(bait.data)[grepl('^Rep\\d+$', colnames(bait.data))]
   # Calculate total background count and size
   background.size <- 0 
   background.counts <- c(0, 0)
@@ -19,7 +21,7 @@ bait.interchr.background <- function(
     if (chrom == bait.chr) {next}
     background.size <- background.size + chr.sizes[[chrom]]
     background.counts <- background.counts + colSums(
-      bait.data[bait.data$fragChr == chrom, c('N1', 'N2')])}
+      bait.data[bait.data$fragChr == chrom, reps])}
   # Calculate, check and return background
   background <- background.counts / background.size
   if (min(background) <= 0) {
@@ -36,36 +38,39 @@ bait.distance.frequency <- function(
   # Extract bait chromosome data
   bait.chr <- unique(bait.data$baitChr)
   if (length(bait.chr) != 1) {
-    stop('non-unique bait chromosome found')}
+    stop('non-unique bait chromosome found')
+  }
   bait.chr.length <- chr.sizes[[bait.chr]]
+  # Calculate and add background
+  background <- bait.interchr.background(bait.data, chr.sizes)
+  bin.background <- background * bin.size
   # Create distance breaks
   max.dist <- max(unlist(chr.sizes)) + 1
   length.out <- ((max.dist - min.dist) / bin.size) + 1
   dist.breaks <- seq(from=min.dist, by=bin.size, length.out=length.out)
   if (tail(dist.breaks, 1) < max.dist) {
-    stop('error in generating breaks')}
-  # Find distance groups for counts
+    stop('error in generating breaks')
+  }
   dist.bins <- cut(abs(bait.data$fragDist), breaks=dist.breaks, right=F)
+  # Create distance bins and create output dat frame
   dist.df <- data.frame(
     'binStart' = head(dist.breaks, -1),
-    'binEnd' = tail(dist.breaks, -1) -1,
-    'N1' = tapply(bait.data$N1, dist.bins, sum),
-    'N2' = tapply(bait.data$N2, dist.bins, sum))
-  # Set intrachromosomal NA counts to zero
-  intra.filter <- matrix(
-    rep(dist.df$binStart < bait.chr.length, times=4),
-    ncol=4
+    'binEnd' = tail(dist.breaks, -1) -1
   )
-  dist.df[is.na(dist.df) & intra.filter] <- 0
-  # Calculate and add background
-  background <- bait.interchr.background(bait.data, chr.sizes)
-  bin.background <- background * bin.size
-  dist.df$N1 <- dist.df$N1 + bin.background['N1']
-  dist.df$N2 <- dist.df$N2 + bin.background['N2']
-  # Convert counts to ratio
-  dist.df$N1 <- dist.df$N1 / sum(dist.df$N1, na.rm=T)
-  dist.df$N2 <- dist.df$N2 / sum(dist.df$N2, na.rm=T)
-  # Generate matrix and return
+  # Add data for each replicate to dataframe
+  reps <- colnames(bait.data)[grepl('^Rep\\d+$', colnames(bait.data))]
+  for (rep in reps) {
+    # Count reads in each distance bin
+    rep.counts <- tapply(bait.data[,rep], dist.bins, sum)
+    # Replace NA with 0 for distances less than chromosome length
+    rep.counts[is.na(rep.counts) & dist.df$binStart < bait.chr.length] <- 0
+    # Add background and calculate bin ratio
+    rep.counts <- rep.counts + bin.background[rep]
+    rep.ratio <- rep.counts / sum(rep.counts, na.rm=T)
+    # Store data
+    dist.df[,rep] <- rep.ratio
+  }
+  # Convert to matrix and return
   dist.matrix <- as.matrix(dist.df)
   return(dist.matrix)
 }
@@ -125,7 +130,8 @@ create.decay.fit <- function(
     min.dist=min.dist,
     bin.size=bin.size,
     chr.sizes=chr.sizes,
-    mc.cores=cores)
+    mc.cores=cores
+  )
   # Merge frequency data and convert to dataframe
   frequency.data <- apply(simplify2array(frequency.list), c(1,2), mean, na.rm=T)
   frequency.data <- as.data.frame(frequency.data)
@@ -133,14 +139,16 @@ create.decay.fit <- function(
   binCentre <- (frequency.data$binStart + frequency.data$binEnd) / 2
   xlimits <- c(min(frequency.data$binStart), max(frequency.data$binEnd))
   # Perform fits and return data
+  reps <- colnames(frequency.data)[grepl('^Rep\\d+$', colnames(frequency.data))]
   fits <- mclapply(
-    frequency.data[,c('N1', 'N2')],
+    frequency.data[,reps],
     distance.decay.monospline,
     x=binCentre,
     limits=xlimits,
     k=k,
-    mc.cores=min(cores, 2))
-  # name and return fits
+    mc.cores=min(cores, length(reps))
+  )
+  # Return fits
   return(fits)
 }
 
@@ -150,13 +158,16 @@ create.decay.fit <- function(
 distance.decay.fit <- function(
   path, min.dist, bin.size, k, chr.sizes, cores
 ) {
-  # Read in data and check dataset
+  # Read in data and extract values
   frag.data <- fread(path, showProgress=F)
   dataset <- unique(frag.data$dataset)
   if (length(dataset) != 1) {
     stop('multiple datasets found')}
-  # Extract proabilites for each bait
+  reps <- colnames(frag.data)[grepl('^Rep\\d+$', colnames(frag.data))]
+  # Split data by bait and convert to dataframe
   bait.list <- split(frag.data, frag.data$baitID)
+  bait.list <- lapply(bait.list, as.data.frame)
+  # Extract proabilites for each bait
   fits <- create.decay.fit(
     bait.list=bait.list,
     min.dist=min.dist,
@@ -166,20 +177,30 @@ distance.decay.fit <- function(
     cores=cores
   )
   # name and return fits
-  replicates <- gsub('^.*?Rep(\\d)Rep(\\d).*?$', '\\1.\\2', basename(path))
-  names(fits) <- paste0(
-    dataset,
-    '.Rep',
-    unlist(strsplit(replicates, '\\.'))
-  )
+  names(fits) <- paste(dataset, reps, sep='.')
   return(fits)
 }
 
-
-
-
-
-
+###############################################################################
+## create distance decay fit for all datasets
+###############################################################################
+distance.decay.fit.all <- function(
+  paths, min.dist, bin.size, k, chr.sizes, cores
+) {
+  # Extract all fits
+  replicate.fits <- lapply(
+    input.paths,
+    distance.decay.fit,
+    min.dist=params$mindist,
+    bin.size=params$binsize,
+    k=params$k,
+    chr.sizes=chr.sizes,
+    cores=params$cores
+  )
+  # flatten fits and return
+  replicate.fits <- do.call(c, replicate.fits)
+  return(replicate.fits)
+}
 
 
 
