@@ -5,23 +5,25 @@ require('DESeq2')
 ###############################################################################
 gen.sample.data <- function(x) {
   # Check consistency of conditions
-  if (any(x$cond1 != x$cond1[1])) {
+  cond1 <- x$cond1[1]
+  if (any(x$cond1 != cond1)) {
     stop('inconsistent condition 1')
   }
-  if (any(x$cond2 != x$cond2[1])) {
+  cond2 <- x$cond2[2]
+  if (any(x$cond2 != cond2)) {
     stop('inconsistent condition 1')
   }
   # Create data frame
   sample.data <- data.frame(
-    'sample' = rep(
-      c(as.character(x$cond1[1]), as.character(x$cond2[2])),
-      each=2),
-    'replicate' = c('Rep1', 'Rep2', 'Rep1', 'Rep2'))
-  # modify row names and return data
-  row.names(sample.data) <- paste(
-    sample.data$sample,
-    sample.data$replicate,
-    sep='.')
+    row.names = colnames(x)[grepl('.Rep\\d+$', colnames(x))])
+  # Add sample names
+  sample.data$sample <- factor(
+    gsub('-', '_', gsub('.Rep\\d+$', '', row.names(sample.data))),
+    levels = gsub('-', '_', c(cond1, cond2))
+  )
+  # Add replicate information and return
+  sample.data$replicate <- gsub(
+    '^.*?(Rep\\d+)$', '\\1', row.names(sample.data))
   return(sample.data)
 }
 
@@ -29,12 +31,8 @@ gen.sample.data <- function(x) {
 ## Function to extract sample counts from data
 ###############################################################################
 gen.frag.counts <- function(x) {
-  # Extract counts
-  counts <- x[,c('cond1.1', 'cond1.2', 'cond2.1', 'cond2.2')]
-  colnames(counts) <- paste0(
-    rep(c(as.character(x$cond1[1]), as.character(x$cond2[1])),
-        each=2),
-    c('.Rep1', '.Rep2', '.Rep1', '.Rep2'))
+  # Extract replicates and counts
+  counts <- x[,grepl('.Rep\\d+$', colnames(x))]
   # Convert to integer and return
   counts <- as.matrix(counts)
   counts <- apply(counts, 2, as.integer)
@@ -69,7 +67,8 @@ calculate.normalisation <- function(mono.fits, x) {
   fitted <- sapply(
     mono.fits,
     predict.monospline,
-    x=x)
+    x=x
+  )
   colnames(fitted) <- names(mono.fits)
   # Calculate normalisation factors
   geo.mean <- exp(rowMeans(log(fitted)))
@@ -91,6 +90,7 @@ format.deseq.output <- function(x, results) {
   output <- data.frame(
     'cond1' = x$cond1,
     'cond2' = x$cond2,
+    'baitName' = x$baitName,
     'baitID' = x$baitID,
     'baitChr' = x$baitChr,
     'baitStart' = x$baitStart,
@@ -109,22 +109,42 @@ format.deseq.output <- function(x, results) {
 }
 
 ###############################################################################
-## Generate count filter
+## Extract results from dds object using hypothesis
 ###############################################################################
-perform.deseq.analysis <- function(x, fits, min.sum) {
+extract.deseq.results <- function(
+  alt.hypothesis, dds, x
+) {
+  # Extract results for supplied hypothesis
+  dds.results <- DESeq2::results(
+    dds,
+    lfcThreshold=alt.hypothesis$lfcThreshold,
+    altHypothesis=alt.hypothesis$altHypothesis  
+  )
+  # Format and return output
+  output <- format.deseq.output(x=x, results=dds.results)
+  return(output)
+}
+
+###############################################################################
+## Perform deseq analysis for a single bait
+###############################################################################
+deseq.analysis.bait <- function(
+  bait.data, fits, min.mean, alt.hypotheses
+) {
   # Extract counts
-  counts <- gen.frag.counts(x)
-  passed <- rowSums(counts) >= min.sum
+  counts <- gen.frag.counts(bait.data)
+  passed <- apply(counts, 1, mean) >= min.mean
   counts <- counts[passed,]
   # Extract additional data
-  sample.data <- gen.sample.data(x)
-  distances <- gen.frag.distances(x)
+  sample.data <- gen.sample.data(bait.data)
+  distances <- gen.frag.distances(bait.data)
   distances <- distances[passed]
   # Create DESeq2 object and add metadata
   dds <- DESeq2::DESeqDataSetFromMatrix(
     countData=counts,
     colData=sample.data,
-    design=~sample)
+    design=~sample
+  )
   S4Vectors::metadata(dds)$distances <- distances
   # Perform distance decay normalisation if fits supplied
   if (!is.null(fits)) {
@@ -135,12 +155,52 @@ perform.deseq.analysis <- function(x, fits, min.sum) {
     colnames(normMatrix) <- colnames(counts)
   }
   # Perform DESeq2 analysis
-  dds <- estimateSizeFactors(dds, normMatrix=normMatrix)
-  dds <- DESeq2::DESeq(dds, fitType='local', betaPrior=T)
-  results <- DESeq2::results(dds)
+  dds <- DESeq2::estimateSizeFactors(dds, normMatrix=normMatrix)
+  dds <- DESeq2::DESeq(dds, fitType='local', betaPrior=F)
+  results.list <- lapply(
+    alt.hypotheses,
+    extract.deseq.results,
+    dds=dds,
+    x=bait.data[passed,]
+  )
   # Format output
-  output <- format.deseq.output(
-    x=x[passed,],
-    results=results)
-  return(output)
+  return(results.list)
 }
+
+###############################################################################
+## Perform deseq analysis for all baits
+###############################################################################
+deseq.analysis.all <- function(
+  bait.list, fits, min.mean, alt.hypotheses, cores
+) {
+  # Perform differential analysis
+  bait.results <- parallel::mclapply(
+    bait.list,
+    deseq.analysis.bait,
+    fits=fits,
+    min.mean=min.mean,
+    alt.hypotheses=alt.hypotheses,
+    mc.cores=cores
+  )
+  # Transpose data and join
+  hypothesis.results <- purrr::transpose(bait.results)
+  hypothesis.results <- lapply(
+    hypothesis.results,
+    data.table::rbindlist
+  )
+  hypothesis.results <- lapply(
+    hypothesis.results,
+    base::as.data.frame
+  )
+  # Adjust pvalue and return
+  hypothesis.results <- lapply(
+    hypothesis.results,
+    function(hr) {
+      hr$padj <- p.adjust(hr$pvalue, method='fdr')
+      return(hr)
+    }
+  )
+  return(hypothesis.results)
+}
+
+
