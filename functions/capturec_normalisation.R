@@ -189,13 +189,13 @@ distance.decay.fit.all <- function(
 ) {
   # Extract all fits
   replicate.fits <- lapply(
-    input.paths,
+    paths,
     distance.decay.fit,
     min.dist=params$mindist,
     bin.size=params$binsize,
     k=params$k,
     chr.sizes=chr.sizes,
-    cores=params$cores
+    cores=cores
   )
   # flatten fits and return
   replicate.fits <- do.call(c, replicate.fits)
