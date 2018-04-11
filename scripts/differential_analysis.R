@@ -45,10 +45,17 @@ for (a in names(alt.hypotheses)) {
   )
 }
 # Extract input file paths and print
-input.paths <- list.files(
-  params$indir,
-  pattern=params$pattern,
-  full.names=T
+input.paths <- list(
+  'CRM' = list.files(
+    params$indir,
+    pattern=paste0('CRM.*?', params$pattern),
+    full.names=T
+  ),
+  'TSS' = list.files(
+    params$indir,
+    pattern=paste0('TSS.*?', params$pattern),
+    full.names=T
+  )
 )
 cat('\nInput Paths:\n')
 for (ip in input.paths) {
@@ -81,7 +88,7 @@ distance.fits <- distance.decay.fit.all(
 )
 # Read in counts for each condition
 condition.counts <- extract.condition.counts(
-  input.paths, suffix=params$pattern, min.dist=params$mindist, intra.only=T,
+  input.paths[1:5], suffix=params$pattern, min.dist=params$mindist, intra.only=T,
   cores=params$cores
 )
 # Loop through comparisons
