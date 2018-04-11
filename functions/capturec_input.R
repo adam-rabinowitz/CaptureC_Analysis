@@ -141,75 +141,72 @@ merge.replicates.all <- function(x, cores) {
   return(bait.list)
 }
 
-##############################################################################
-## Function to merge view points
-##############################################################################
+###############################################################################
+## Merge multiple (2+) conditions for a single bait
+###############################################################################
 merge.conditions.bait <- function(x) {
   # Check input
   if (class(x) != 'list') {
     stop('input must be a list')
   }
-  if (length(x) != 2) {
+  if (length(x) < 2) {
     stop('list must have a length of two')
   }
   if (any(sapply(x, class) != 'data.frame')) {
     stop('input must be a list of data.frame')
   }
-  # Extract conditions and check identity
-  cond1 <- unique(x[[1]]$dataset)
-  cond2 <- unique(x[[2]]$dataset)
-  if (length(cond1) != 1 | length(cond2) != 1) {
-    stop('multiple conditions found')
+  # Extract datasets and bait id and check
+  datasets <- sapply(x, function(z) {unique(z$dataset)})
+  baitID <- unique(sapply(x, function(z) {unique(z$baitID)}))
+  if (!all(datasets == names(x))) {
+    stop('ambiguous datasets present')
   }
-  if (cond1 == cond2) {
-    stop('conditions are not unique')
+  if (length(baitID) != 1) {
+    stop('multiple baits present')
   }
-  # Rename columns for first condition
-  colnames(x[[1]]) <- gsub('^dataset$', 'cond1', colnames(x[[1]]))
-  x1.replicates <- colnames(x[[1]])[grepl('Rep\\d', colnames(x[[1]]))]
-  x1.replicates <- paste(cond1, x1.replicates, sep='.')
-  colnames(x[[1]])[grepl('Rep\\d', colnames(x[[1]]))] <- x1.replicates
-  # Rename columns for second condition
-  colnames(x[[2]]) <- gsub('^dataset$', 'cond2', colnames(x[[2]]))
-  x2.replicates <- colnames(x[[2]])[grepl('Rep\\d', colnames(x[[2]]))]
-  x2.replicates <- paste(cond2, x2.replicates, sep='.')
-  colnames(x[[2]])[grepl('Rep\\d', colnames(x[[2]]))] <- x2.replicates
-  # Merge data and check all entries are unique
-  merged <- merge(x=x[[1]], y=x[[2]], all=T)
-  if (length(merged$fragID) != length(unique(merged$fragID))) {
-    stop('Non-unique fragments present in output data')
+  # Rename replicates with condition
+  x <- lapply(
+    x,
+    function(z) {
+      z.replicates <- colnames(z)[grepl('Rep\\d+', colnames(z))]
+      z.replicates <- paste(z$dataset[1], z.replicates, sep='.')
+      colnames(z)[grepl('Rep\\d+', colnames(z))] <- z.replicates
+      z$dataset <- NULL
+      return(z)
+    }
+  )
+  # Merge data
+  merged <- x[[1]]
+  for (i in 2:length(x)) {
+    merged <- merge(merged, x[[i]], all=T)
   }
-  # Fill in missing data
-  merged$cond1 <- cond1
-  merged$cond2 <- cond2
+  # Fill in missing data and return
   reps <- colnames(merged)[grepl('\\.Rep\\d+$', colnames(merged))]
   for (rep in reps) {
     rep.counts <- merged[,rep,drop=T]
     rep.counts[is.na(rep.counts)] <- 0
     merged[,rep] <- rep.counts
   }
-  # Rorder columns and return
-  merged <- cbind(
-    merged[,c('cond1', 'cond2')],
-    merged[,!grepl('^cond\\d+$', colnames(merged))]
-  )
   return(merged)
 }
 
 ###############################################################################
-## Function to merge all baits in dataset
+## Merge multiple (2+) conditions for a multiple baits
 ###############################################################################
 merge.conditions.all <- function(x, cores) {
   # Check input
   if (class(x) != 'list') {
     stop('input must be a list')
   }
-  if (length(x) != 2) {
-    stop('list must have a length of two')
+  if (length(x) < 2) {
+    stop('list must have a length of >=2')
   }
   # Check names of all baits
-  if (!all(names(x[[1]]) == names(x[[2]]))) {
-    stop('different baits present')
+  baits <- names(x[[1]])
+  for (i in 2:length(x)) {
+    if (!all(names(x[[i]]) == baits)) {
+      stop('different baits present')
+    }
   }
   # Transpose baits
   tran.baits <- purrr::transpose(x)
@@ -260,5 +257,26 @@ extract.condition.counts <- function(
   )
   # Rename condition counts and return
   return(condition.counts)
+}
+
+##############################################################################
+## Extract all counts by bait
+##############################################################################
+extract.merged.counts <- function(
+  input.paths, suffix, min.dist, intra.only, cores
+) {
+  # Extract counts for each condition
+  condition.counts <- extract.condition.counts(
+    input.paths=input.paths,
+    suffix=suffix,
+    min.dist=min.dist,
+    intra.only=intra.only,
+    cores=cores
+  )
+  # Merge counts across all conditions
+  merged <- merge.conditions.all(
+    condition.counts,
+    cores=cores
+  )
 }
 
