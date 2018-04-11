@@ -138,9 +138,7 @@ params <- list(
   outdir='all_replicate_results/fragments',
   chicagoCRMdir='/g/furlong/project/37_Capture-C/analysis/TS_Capture/CRM_all',
   chicagoTSSdir='/g/furlong/project/37_Capture-C/analysis/TS_Capture/TSS_all',
-  chicago.pattern='_Rep\\d+Rep\\d+.Rds',
-  norm.pattern='.deseq2_norm_results.txt',
-  raw.pattern='.deseq2_raw_results.txt',
+  chicago.pattern='_(Rep\\d+){2,}.Rds',
   fragfile='/g/furlong/project/37_Capture-C/analysis/TS_Capture/CRM_all/design/dm6_DpnII.rmap',
   CRMbaits='/g/furlong/project/37_Capture-C/analysis/TS_Capture/CRM_all/design/dm6_DpnII.baitmap',
   TSSbaits='/g/furlong/project/37_Capture-C/analysis/TS_Capture/TSS_all/design/dm6_DpnII.baitmap',
@@ -151,14 +149,22 @@ params <- list(
   window=1000
 )
 setwd(params$workdir)
+# Set patterns
+patterns <- list(
+  'norm.above0.0' = 'above0.0.deseq2_norm_results.txt$',
+  'norm.above1.0' = 'above1.0.deseq2_norm_results.txt$',
+  'norm.below0.5' = 'below0.5.deseq2_norm_results.txt$',
+  'raw.above0.0' = 'above0.0.deseq2_raw_results.txt$',
+  'raw.above1.0' = 'above1.0.deseq2_raw_results.txt$',
+  'raw.below0.5' = 'below0.5.deseq2_raw_results.txt$'
+)
 # Extract differential result paths
-input.paths <- list(
-  'raw' = list.files(
-    params$indir, pattern=params$raw.pattern, full.names=T),
-  'norm' = list.files(
-    params$indir, pattern=params$norm.pattern, full.names=T))
-names(input.paths[['raw']]) <- gsub(params$raw.pattern, '', basename(input.paths[['raw']]))
-names(input.paths[['norm']]) <- gsub(params$norm.pattern, '', basename(input.paths[['norm']]))
+input.paths <- lapply(
+  patterns,
+  function(pattern) {
+    list.files(path=params$indir, pattern=pattern)
+  }
+)
 # Read in chicago and dhs data
 chicago.paths <- c(
   list.files(params$chicagoTSSdir, pattern=params$chicago.pattern, full=T),
@@ -496,6 +502,69 @@ dev.off()
 
 
 
+sig.fragments <- read.table(
+  '/g/furlong/project/37_Capture-C/data/diffinter/merged_results/fragments/temp_norm_sig.txt',
+  sep='\t', header=T
+)
+sig.fragments.list <- split(
+  sig.fragments,
+  paste(sig.fragments$cond1, sig.fragments$cond2, sep='.')
+)
+sig.fragments.list <- lapply(
+  sig.fragments.list,
+  function(z) {
+    z.grange <- makeGRangesFromDataFrame(
+      z,
+      seqnames.field='fragChr',
+      start.field='fragStart',
+      end.field='fragEnd'
+    )
+    z$chicago <- count.overlap.type(
+      z.grange,
+      chicago.grange,
+      as.character(z$cond1[1]),
+      as.character(z$cond2[2])
+    )
+    z$dhs <- count.overlap.type(
+      z.grange,
+      dhs.grange,
+      as.character(z$cond1[1]),
+      as.character(z$cond2[2])
+    )
+    return(z)
+  }
+)
+
+
+sig.fragments <- do.call(rbind, sig.fragments.list)
+sig.fragments$dhs <- factor(sig.fragments$dhs, levels=c('none', 'general', 'specific'))
+sig.fragments$chicago <- factor(sig.fragments$chicago, levels=c('none', 'general', 'specific'))
+pdf(
+  '/g/furlong/project/37_Capture-C/data/diffinter/merged_results/fragments/temp_norm_sig.pdf',
+  height=7, width=10, onefile=T
+)
+ggplot(
+  sig.fragments,
+  aes(x=paste(lfcThr, altHyp, sep='.'))
+) + geom_bar() +
+  geom_text(stat='count', aes(label=..count..), vjust=-0.4) +
+  labs(x = 'alternative hypothesis', title='Number Of Significant Fragments')
+ggplot(
+  sig.fragments,
+  aes(x=abs(lfc), col=paste(lfcThr, altHyp, sep='.'))
+) + geom_density() +
+  labs(x = 'absolute log fold-change', title='Distribution Of Log Fold-Change', col='alt.hyp')
+ggplot(
+  sig.fragments,
+  aes(x=paste(lfcThr, altHyp, sep='.'), fill=dhs)
+) + geom_bar(position='fill') +
+  labs(x='alternative hypothesis', title='DHS Overlap Ratio')
+ggplot(
+  sig.fragments,
+  aes(x=paste(lfcThr, altHyp, sep='.'), fill=chicago)
+) + geom_bar(position='fill') +
+  labs(x='alternative hypothesis', title='Chicago Overlap Ratio')
+dev.off()
 
 
 
