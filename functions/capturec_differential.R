@@ -1,29 +1,47 @@
 require('DESeq2')
+require('parallel')
 
 ###############################################################################
 ## Generate sample data
 ###############################################################################
 gen.sample.data <- function(x) {
-  # Check consistency of conditions
-  cond1 <- x$cond1[1]
-  if (any(x$cond1 != cond1)) {
-    stop('inconsistent condition 1')
-  }
-  cond2 <- x$cond2[2]
-  if (any(x$cond2 != cond2)) {
-    stop('inconsistent condition 1')
-  }
   # Create data frame
   sample.data <- data.frame(
-    row.names = colnames(x)[grepl('.Rep\\d+$', colnames(x))])
-  # Add sample names
-  sample.data$sample <- factor(
-    gsub('-', '_', gsub('.Rep\\d+$', '', row.names(sample.data))),
-    levels = gsub('-', '_', c(cond1, cond2))
+    row.names = colnames(x)[grepl('.Rep\\d+$', colnames(x))]
   )
-  # Add replicate information and return
+  # Add dataset
+  sample.data$dataset <- gsub(
+    '^(CRM|TSS)_(\\d+)-(\\d+h)_([[:alnum:]]+)\\.(Rep\\d+)$',
+    '\\1',
+    row.names(sample.data)
+  )
+  # Add time
+  sample.data$time <- gsub(
+    '^(CRM|TSS)_(\\d+)-(\\d+h)_([[:alnum:]]+)\\.(Rep\\d+)$',
+    paste('\\2', '\\3', sep='.'),
+    row.names(sample.data)
+  )
+  # Add tissue
+  sample.data$tissue <- gsub(
+    '^(CRM|TSS)_(\\d+)-(\\d+h)_([[:alnum:]]+)\\.(Rep\\d+)$',
+    '\\4',
+    row.names(sample.data)
+  )
+  # Add condition
+  sample.data$condition <- paste(
+    sample.data$time, sample.data$tissue, sep='_'
+  )
+  sample.data$condition <- factor(
+    sample.data$condition,
+    levels=unique(sample.data$condition)
+  )
+  # Add replicate
   sample.data$replicate <- gsub(
-    '^.*?(Rep\\d+)$', '\\1', row.names(sample.data))
+    '^(CRM|TSS)_(\\d+)-(\\d+h)_([[:alnum:]]+)\\.(Rep\\d+)$',
+    '\\5',
+    row.names(sample.data)
+  )
+  # Return data
   return(sample.data)
 }
 
@@ -84,53 +102,9 @@ calculate.normalisation <- function(mono.fits, x) {
 }
 
 ###############################################################################
-## Format output data
+## Create DESEqDataSet object for a single bait
 ###############################################################################
-format.deseq.output <- function(x, results) {
-  output <- data.frame(
-    'cond1' = x$cond1,
-    'cond2' = x$cond2,
-    'baitName' = x$baitName,
-    'baitID' = x$baitID,
-    'baitChr' = x$baitChr,
-    'baitStart' = x$baitStart,
-    'baitEnd' = x$baitEnd,
-    'fragID' = x$fragID,
-    'fragChr' = x$fragChr,
-    'fragStart' = x$fragStart,
-    'fragEnd' = x$fragEnd,
-    'fragDist' = x$fragDist,
-    'baseMean' = results$baseMean,
-    'lfc' = results$log2FoldChange,
-    'pvalue' = results$pvalue,
-    'padj' = results$padj
-  )
-  return(output)
-}
-
-###############################################################################
-## Extract results from dds object using hypothesis
-###############################################################################
-extract.deseq.results <- function(
-  alt.hypothesis, dds, x
-) {
-  # Extract results for supplied hypothesis
-  dds.results <- DESeq2::results(
-    dds,
-    lfcThreshold=alt.hypothesis$lfcThreshold,
-    altHypothesis=alt.hypothesis$altHypothesis  
-  )
-  # Format and return output
-  output <- format.deseq.output(x=x, results=dds.results)
-  return(output)
-}
-
-###############################################################################
-## Perform deseq analysis for a single bait
-###############################################################################
-deseq.analysis.bait <- function(
-  bait.data, fits, min.mean, alt.hypotheses
-) {
+create.dds.bait <- function(bait.data, min.mean) {
   # Extract counts
   counts <- gen.frag.counts(bait.data)
   passed <- apply(counts, 1, mean) >= min.mean
@@ -143,64 +117,142 @@ deseq.analysis.bait <- function(
   dds <- DESeq2::DESeqDataSetFromMatrix(
     countData=counts,
     colData=sample.data,
-    design=~sample
+    design=~condition
   )
-  S4Vectors::metadata(dds)$distances <- distances
+  S4Vectors::metadata(dds)$baitdata <- bait.data[
+    passed, !grepl('\\.Rep\\d+$', colnames(bait.data))]
+  # Return dds object
+  return(dds)
+}
+
+###############################################################################
+## Create DESEqDataSet object for a single bait
+###############################################################################
+create.dds.all <- function(bait.list, min.mean, cores=cores) {
+  # Create dds from list of bait data and return
+  dds.list <- parallel::mclapply(
+    bait.list,
+    create.dds.bait,
+    min.mean=min.mean,
+    mc.cores=cores
+  )
+  return(dds.list)
+}
+
+###############################################################################
+## Perform deseq analysis for a single DESeqDataSet
+###############################################################################
+deseq.analysis.bait <- function(
+  dds, fits
+) {
+  # Extract distances
+  distances <- abs(metadata(dds)$baitdata$fragDist)
   # Perform distance decay normalisation if fits supplied
   if (!is.null(fits)) {
     normMatrix <- calculate.normalisation(
       fits[colnames(dds)], distances)$factors
-  } else {
-    normMatrix <- matrix(1, nrow=nrow(counts), ncol=ncol(counts))
-    colnames(normMatrix) <- colnames(counts)
+    dds <- DESeq2::estimateSizeFactors(dds, normMatrix=normMatrix)
   }
-  # Perform DESeq2 analysis
-  dds <- DESeq2::estimateSizeFactors(dds, normMatrix=normMatrix)
+  # Perform DESeq2 analysis and return dds object
   dds <- DESeq2::DESeq(dds, fitType='local', betaPrior=F)
-  results.list <- lapply(
-    alt.hypotheses,
-    extract.deseq.results,
-    dds=dds,
-    x=bait.data[passed,]
-  )
-  # Format output
-  return(results.list)
+  return(dds)
 }
 
 ###############################################################################
 ## Perform deseq analysis for all baits
 ###############################################################################
 deseq.analysis.all <- function(
-  bait.list, fits, min.mean, alt.hypotheses, cores
+  dds.list, fits, cores
 ) {
-  # Perform differential analysis
-  bait.results <- parallel::mclapply(
-    bait.list,
+  # Perform differential analysis and return results
+  dds.list <- parallel::mclapply(
+    dds.list,
     deseq.analysis.bait,
     fits=fits,
-    min.mean=min.mean,
-    alt.hypotheses=alt.hypotheses,
     mc.cores=cores
   )
-  # Transpose data and join
-  hypothesis.results <- purrr::transpose(bait.results)
-  hypothesis.results <- lapply(
-    hypothesis.results,
-    data.table::rbindlist
-  )
-  hypothesis.results <- lapply(
-    hypothesis.results,
-    base::as.data.frame
-  )
-  # Adjust pvalue and return
-  hypothesis.results <- lapply(
-    hypothesis.results,
-    function(hr) {
-      hr$padj <- p.adjust(hr$pvalue, method='fdr')
-      return(hr)
-    }
-  )
-  return(hypothesis.results)
+  return(dds.list)
 }
 
+###############################################################################
+## Extract results from single dds object using single hypothesis and contrast
+###############################################################################
+deseq.results.bait <- function(
+  dds, dataset, normalisation, alt.hypothesis, contrast, alpha
+) {
+  # Edit contrasts
+  alt.contrast <- gsub('-', '.', contrast)
+  # Extract results for supplied hypothesis
+  dds.results <- DESeq2::results(
+    dds,
+    contrast = c('condition', alt.contrast[1], alt.contrast[2]),
+    lfcThreshold=alt.hypothesis$lfcThreshold,
+    altHypothesis=alt.hypothesis$altHypothesis,
+    independentFiltering=T,
+    alpha=alpha
+  )
+  # Extract bait data
+  bait.data <- metadata(dds)$baitdata
+  # Create output and return
+  output <- data.frame(
+    'dataset' = dataset,
+    'normalisation' = normalisation,
+    'cond1' = contrast[1],
+    'cond2' = contrast[2],
+    'lfcThr' = alt.hypothesis$lfcThreshold,
+    'altHyp' = alt.hypothesis$altHypothesis,
+    'baitName' = bait.data$baitName,
+    'baitID' = bait.data$baitID,
+    'baitChr' = bait.data$baitChr,
+    'baitStart' = bait.data$baitStart,
+    'baitEnd' = bait.data$baitEnd,
+    'fragID' = bait.data$fragID,
+    'fragChr' = bait.data$fragChr,
+    'fragStart' = bait.data$fragStart,
+    'fragEnd' = bait.data$fragEnd,
+    'fragDist' = bait.data$fragDist,
+    'baseMean' = dds.results$baseMean,
+    'lfc' = dds.results$log2FoldChange,
+    'pvalue' = dds.results$pvalue,
+    'padj' = dds.results$padj
+  )
+  return(output)
+}
+
+###############################################################################
+## Extract results from many dds objects using many hypotheses and contrasts
+###############################################################################
+deseq.results.all <- function(
+  dds.list, contrasts, alt.hypotheses, alpha, dataset, normalisation, outdir,
+  suffix, cores
+) {
+  # Loop through contrasts and hypotheses to generate results
+  combinations <- expand.grid(names(contrasts), names(alt.hypotheses))
+  for (i in 1:nrow(combinations)) {
+    # Extract names
+    contrast.name <- as.character(combinations[i, 1])
+    alt.hypothesis.name <- as.character(combinations[i, 2])
+    out.file <- paste(
+      dataset, contrast.name, alt.hypothesis.name, suffix, sep='.'
+    )
+    out.path <- file.path(outdir, out.file)
+    # Extract results
+    results <- parallel::mclapply(
+      dds.list,
+      deseq.results.bait,
+      dataset=dataset,
+      normalisation=normalisation,
+      alt.hypothesis=alt.hypotheses[[alt.hypothesis.name]],
+      contrast=contrasts[[contrast.name]],
+      alpha=alpha,
+      mc.cores=cores
+    )
+    results <- data.table::rbindlist(results)
+    # Write to file
+    data.table::fwrite(
+      results, out.path, sep='\t', quote=F, col.names=T, row.names=F,
+      showProgress=F
+    )
+  }
+}
 
