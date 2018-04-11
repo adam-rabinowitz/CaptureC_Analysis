@@ -26,20 +26,17 @@ outdir <- '/g/furlong/project/37_Capture-C/data/diffinter/input/'
 read.rds <- function(rds, bait, frag, outdir) {
   # Extract dataset and create output file
   dataset <- gsub(
-    '^.*?((TSS|CRM)_\\d+-\\d+h_[^_]+)_Rep\\dRep\\d.Rds$', '\\1', rds)
+    '^.*?((TSS|CRM)_\\d+-\\d+h_[^_]+)_(Rep\\d+){2,}.Rds$', '\\1', basename(rds))
   prefix <- gsub(
-    '^.*?((TSS|CRM)_\\d+-\\d+h_[^_]+_Rep\\dRep\\d).Rds$', '\\1', rds)
+    '^.*?((TSS|CRM)_\\d+-\\d+h_[^_]+_(Rep\\d+){2,}).Rds$', '\\1', rds)
   replicates <- gsub(
-    '^.*?(TSS|CRM)_\\d+-\\d+h_[^_]+_(Rep\\dRep\\d).Rds$', '\\2', rds)
-  replicates <- c(
-    substring(replicates, 1, 4),
-    substring(replicates, 5, 8)
-  )
+    '^.*?(TSS|CRM)_\\d+-\\d+h_[^_]+_((Rep\\d+){2,}).Rds$', '\\2', rds)
+  replicates <- tail(unlist(strsplit(replicates, 'Rep', perl=T)), -1)
   # Read in counts and filter desired columns
   cd <- readRDS(rds)@x
-  cols <- c('baitID', 'otherEndID', 'distSign', 'N.1', 'N.2')
+  cols <- c('baitID', 'otherEndID', 'distSign', paste0('N.', replicates))
   cd <- cd[,cols,with=F]
-  names(cd) <- c('baitID', 'fragID', 'fragDist', replicates)
+  names(cd) <- c('baitID', 'fragID', 'fragDist', paste0('Rep', replicates))
   # Read in bait data and merge
   baitmap <- fread(bait)
   names(baitmap) <- c('baitChr', 'baitStart', 'baitEnd', 'baitID', 'baitName')
@@ -53,15 +50,16 @@ read.rds <- function(rds, bait, frag, outdir) {
   # Reorder data and save
   output <- cd.frag[,c(
     'dataset', 'baitName', 'baitID', 'baitChr', 'baitStart', 'baitEnd',
-    'fragID', 'fragChr', 'fragStart', 'fragEnd', 'fragDist', replicates),
-    with=F]
+    'fragID', 'fragChr', 'fragStart', 'fragEnd', 'fragDist',
+    paste0('Rep', replicates)), with=F
+  ]
   output <- output[order(output$baitID, output$fragID),]
   outfile <- file.path(outdir, paste0(prefix, '.counts.txt'))
   write.table(output, outfile, row.names=F, col.names=T, quote=F, sep='\t')
 }
 
 ###############################################################################
-## Calculate background
+## Create output files
 ###############################################################################
 # Create files
 for (DS in c('CRM', 'TSS')) {
