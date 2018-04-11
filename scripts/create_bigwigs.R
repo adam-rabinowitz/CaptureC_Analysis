@@ -1,182 +1,170 @@
 rm(list=ls())
 require(data.table)
-source('~/github/CaptureC_Analysis/functions/capturec_input.R')
-source('~/github/CaptureC_Analysis/functions/capturec_normalisation.R')
-source('~/github/CaptureC_Analysis/functions/capturec_differential.R')
+source('/g/furlong/adamr/github/CaptureC_Analysis/functions/capturec_input.R')
+source('/g/furlong/adamr/github/CaptureC_Analysis/functions/capturec_normalisation.R')
+source('/g/furlong/adamr/github/CaptureC_Analysis/functions/capturec_differential.R')
+
+###############################################################################
+## Function to create bigwig from bedgraph data
+###############################################################################
+createBigWig <- function(
+  bg, bg.path, chr.path, bw.script
+) {
+  # Check bedgraph path
+  if (!endsWith(bg.path, '.bedGraph')) {
+    stop('Unrecognised suffix for bedgraph file path')
+  }
+  # Escape brackets
+  bg.path <- gsub('(\\(|\\))', '\\\\\\1', bg.path)
+  # Save bedgraph to file
+  write.table(
+    bg, file=bg.path, row.names=F, col.names=F, sep='\t', quote=F
+  )
+  # Create path to bigwig file and create command to convert
+  bw.path <- gsub('.bedGraph$', '.bw', bg.path)
+  command <- paste(bw.script, bg.path, chr.path, bw.path, '&&', 'rm', bg.path)
+  system(command, wait=T)
+}
+
+###############################################################################
+## Function to calculate size factors
+###############################################################################
+calculate.size.factors <- function(
+  bait.data, distance.fits
+) {
+  # Extract count data for bait and find common fragments
+  counts <- gen.frag.counts(bait.data)
+  common.indices <- which(apply(counts, 1, min) > 0)
+  common.counts <- counts[common.indices,]
+  common.distances <- abs(bait.data$fragDist)[common.indices]
+  # Calculate size factors and return
+  common.norm.factors <- calculate.normalisation(
+    distance.fits[colnames(common.counts)],
+    common.distances
+  )$factors
+  size.factors <- DESeq2::estimateSizeFactorsForMatrix(
+    common.counts / common.norm.factors
+  )
+  return(size.factors)
+}
+
+###############################################################################
+## Main script to generate bigwigs
+###############################################################################
 # Set parameters
 params <- list(
-  min.dist=2000,
-  bin.size=1000,
-  cores=8,
+  mindist=2000,
+  binsize=1000,
+  cores=4,
   k=20,
   indir='/g/furlong/project/37_Capture-C/data/diffinter/input',
   outdir='/g/furlong/project/37_Capture-C/data/diffinter/tracks',
+  pattern='_(Rep\\d+){2,}.counts.txt',
   chr.file='/g/furlong/project/37_Capture-C/data/diffinter/chr_sizes.txt',
   wig.script='/g/furlong/adamr/bedGraphToBigWig'
 )
 # Read in chromosome files
 chr.sizes <- read.csv(
-  params$chr.file, sep='\t', header=F, col.names=c('chr', 'size')
+params$chr.file, sep='\t', header=F, col.names=c('chr', 'size')
 )
 chr.sizes <- split(chr.sizes$size, chr.sizes$chr)
 # Extract inut paths
 input.paths <- list(
   'TSS' = list.files(
-    params$indir, pattern='TSS_.*?_Rep1Rep2.counts.txt$', full.names=T
+    params$indir, pattern='TSS_.*?_(Rep\\d+){2,}\\.counts\\.txt$', full.names=T
   ),
   'CRM' = list.files(
-    params$indir, pattern='CRM_.*?_Rep1Rep2.counts.txt$', full.names=T
+    params$indir, pattern='CRM_.*?_(Rep\\d+){2,}\\.counts\\.txt$', full.names=T
   )
 )
-# Create fits
-dataset.fits <- lapply(
-  input.paths,
-  function(dataset) {
-    fits <- lapply(
-      dataset,
-      distance.decay.fit,
-      min.dist=params$min.dist,
-      bin.size=params$bin.size,
-      k=params$k,
-      chr.sizes=chr.sizes,
-      cores=params$cores
-    )
-    do.call(c, fits)
-  }
-)
-# Extract counts
-dataset.counts <- lapply(
-  input.paths,
-  function(dataset) {
-    lapply(
-      dataset,
-      read.split.replicates,
-      min.dist=params$min.dist,
-      intra.only=T
-    )
-  }
-)
 # Process baits sequentially for each dataset
-for (dataset in names(dataset.counts)) {
+for (dataset in names(input.paths)) {
+  # Create fits
+  distance.fits <- distance.decay.fit.all(
+    input.paths[[dataset]],
+    min.dist=params$mindist,
+    bin.size=params$binsize,
+    k=params$k,
+    chr.sizes=chr.sizes,
+    cores=params$cores
+  )
+  # Read in counts for each condition
+  merged.counts <- extract.merged.counts(
+    input.paths[[dataset]],
+    suffix=params$pattern,
+    min.dist=params$mindist,
+    intra.only=T,
+    cores=params$cores
+  )
   # Process each bait sequentially
-  baits <- unique(c(sapply(dataset.counts[[dataset]], names)))
-  for (bait in baits) {
-    bait.list <- lapply(dataset.counts[[dataset]], function(z) z[[bait]])
-    # Find common fragments for each bait
-    bait.frags <- lapply(
-      bait.list,
-      function(z) {
-        z$fragID[pmin(z$N1, z$N2) > 0]
-      }
-    )
-    common.frags <- Reduce(intersect, bait.frags)
-    # Extract matrix of common counts for each fragment
-    common.counts <- lapply(
-      bait.list,
-      function(z) {
-        counts <- data.frame(z[,c('N1', 'N2')])
-        row.names(counts) <- as.character(z$fragID)
-        colnames(counts) <- paste0(
-          rep(z$dataset[1], 2),
-          c('.Rep1', '.Rep2')
-        )
-        counts <- counts[as.character(common.frags),]
-      }
-    )
-    common.counts <- do.call(cbind, common.counts)
-    # Calculate norm matrix
-    common.distances <- bait.list[[1]]$fragDist[
-      match(common.frags, bait.list[[1]]$fragID)]
-    norm.factors <- calculate.normalisation(
-      dataset.fits[[dataset]][colnames(common.counts)],
-      abs(common.distances)
-    )
+  for (bait in names(merged.counts)) {
+    # Extract count data for bait
+    bait.data <- merged.counts[[bait]]
+    bait.name <- unique(bait.data$baitName)
+    if (length(bait.name) != 1) {
+      stop('non-unique bait name')
+    }
+    reps <- colnames(bait.data)[grepl('\\.Rep\\d+$', colnames(bait.data))]
+    counts <- gen.frag.counts(bait.data)
     # Calculate size factors
-    size.factors <- DESeq2::estimateSizeFactorsForMatrix(
-      common.counts / norm.factors$factors
+    size.factors <- calculate.size.factors(
+      bait.data=bait.data,
+      distance.fits=distance.fits
     )
-    # Process each bait sequentially
-    for (bait.data in bait.list) {
-      # Extract replicate names
-      replicates <- paste0(
-        rep(bait.data$dataset[1], 2),
-        c('.Rep1', '.Rep2')
-      )
-      # Extract replicate counts and normalise to distance
-      replicate.counts <- bait.data[,c('N1', 'N2')]
-      # Calculate and apply distance normalisation 
-      norm.factors <- calculate.normalisation(
-        dataset.fits[[dataset]],
-        abs(bait.data$fragDist)
-      )$factors
-      norm.counts <- replicate.counts / norm.factors[,replicates]
-      # Apply size factors
-      size.counts <- t(t(norm.counts) / size.factors[replicates])
-      colnames(size.counts) <- replicates
-      # Extract interval data
-      interval.data <- data.frame(
-        'chr' = bait.data$fragChr,
-        'start' = bait.data$fragStart - 1,
-        'end' = bait.data$fragEnd
-      )
-      # Create output file prefix and header
+    # Calculate distance normalisation and normalise counts
+    norm.factors <- calculate.normalisation(
+      distance.fits[colnames(counts)],
+      abs(bait.data$fragDist)
+    )$factors
+    norm.counts <- counts / norm.factors
+    size.counts <- t(t(norm.counts) / size.factors[colnames(norm.counts)])
+    # Extract interval data
+    interval.data <- data.frame(
+      'chr' = bait.data$fragChr,
+      'start' = bait.data$fragStart - 1,
+      'end' = bait.data$fragEnd
+    )
+    # Extract all conditions and spli replicate by conditions
+    condition.list <- split(
+      colnames(counts),
+      gsub('\\.Rep\\d+$', '', colnames(counts))
+    )
+    # Loop through conditions and save data to bedgraph
+    for (condition in names(condition.list)) {
+      # Create output file prefix
       prefix <- file.path(
         params$outdir,
         paste(
-          gsub('_', '.', bait.data$dataset[1]),
-          bait.data$baitID[1],
-          sep='.'
+          bait.name, condition, sep='_'
         )
       )
-      # Save replicate 1 bedgraph
-      rep1.bg <- interval.data
-      rep1.bg$score <- size.counts[,1]
-      rep1.bg <- rep1.bg[rep1.bg$score > 0,]
-      write.table(
-        rep1.bg, file=paste0(prefix, '.Rep1.bedGraph'), row.names=F,
-        col.names=F, sep='\t', quote=F)
-      system(
-        paste(
-          params$wig.script,
-          paste0(prefix, '.Rep1.bedGraph'),
-          params$chr.file,
-          paste0(prefix, '.Rep1.bw')
-        )
+      # Extract counts for condition
+      condition.reps <- condition.list[[condition]]
+      condition.counts <- size.counts[,condition.reps]
+      # Create mean bedgraph
+      mean.bg <- interval.data
+      mean.bg$score <- apply(condition.counts, 1, mean)
+      mean.bg <- mean.bg[mean.bg$score > 0,]
+      mean.path <- paste0(prefix, '_Mean.bedGraph')
+      createBigWig(
+        bg=mean.bg, bg.path=mean.path, chr.path=params$chr.file,
+        bw.script=params$wig.script
       )
-      # Save replicate 2 bedgraph
-      rep2.bg <- interval.data
-      rep2.bg$score <- size.counts[,2]
-      rep2.bg <- rep2.bg[rep2.bg$score > 0,]
-      write.table(
-        rep2.bg, file=paste0(prefix, '.Rep2.bedGraph'), row.names=F,
-        col.names=F, sep='\t', quote=F)
-      system(
-        paste(
-          params$wig.script,
-          paste0(prefix, '.Rep2.bedGraph'),
-          params$chr.file,
-          paste0(prefix, '.Rep2.bw')
+      # Loop through replicates and create individual bedgraphs
+      for (cr in condition.reps) {
+        rep.no <- gsub('^.*?\\.(Rep\\d+$)', '\\1', cr)
+        rep.bg <- interval.data
+        rep.bg$score <- condition.counts[,cr]
+        rep.bg <- rep.bg[rep.bg$score > 0,]
+        rep.path <- paste0(prefix, '_', rep.no, '.bedGraph')
+        createBigWig(
+          bg=rep.bg, bg.path=rep.path, chr.path=params$chr.file,
+          bw.script=params$wig.script
         )
-      )
-      # Save combined bedgraph
-      comb.bg <- interval.data
-      comb.bg$score <- apply(size.counts, 1, mean)
-      write.table(
-        comb.bg, file=paste0(prefix, '.Comb.bedGraph'), row.names=F,
-        col.names=F, sep='\t', quote=F)
-      system(
-        paste(
-          params$wig.script,
-          paste0(prefix, '.Comb.bedGraph'),
-          params$chr.file,
-          paste0(prefix, '.Comb.bw')
-        )
-      )
+      }
     }
   }
 }
-
-
 
 
 
