@@ -133,9 +133,8 @@ extract.bait.names <- function(path.list) {
 ###############################################################################
 # Set parametrs
 params <- list(
-  workdir='/g/furlong/project/37_Capture-C/data/diffinter',
-  indir='merged_results/fragments',
-  outdir='merged_results/fragments',
+  sig.file='/g/furlong/project/37_Capture-C/data/diffinter/five_hypotheses_merged/fragments/significant_fragments_fdr_0.1.txt',
+  outdir='/g/furlong/project/37_Capture-C/data/diffinter/five_hypotheses_merged/',
   chicagoCRMdir='/g/furlong/project/37_Capture-C/analysis/TS_Capture/CRM_all',
   chicagoTSSdir='/g/furlong/project/37_Capture-C/analysis/TS_Capture/TSS_all',
   chicago.pattern='(Rep\\d+){2,4}\\.Rds',
