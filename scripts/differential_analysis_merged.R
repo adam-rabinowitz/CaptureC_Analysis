@@ -104,7 +104,9 @@ cat('\nChromosome Sizes:\n')
 for (chr in names(chr.sizes)) {
   cat(paste0('\t', chr, ' : ', chr.sizes[chr], '\n'))}
 rm(chr)
-# Loop through 
+# Loop through
+cat('\nStarting dataset analysis\n')
+gc()
 for (dataset in names(input.paths)) {
   # Create fits
   distance.fits <- distance.decay.fit.all(
@@ -123,6 +125,8 @@ for (dataset in names(input.paths)) {
     intra.only=T,
     cores=params$cores
   )
+  cat(paste0('Read input files: ', dataset, '\n'))
+  gc()
   # Create list of DSESeqDataSets and delete counts
   dds.list <- create.dds.all(
     merged.counts,
@@ -130,12 +134,17 @@ for (dataset in names(input.paths)) {
     cores=params$cores
   )
   rm(merged.counts)
+  cat(paste0('Created dds list: ', dataset, '\n'))
+  gc()
   # Perform normalised analysis
   norm.dds <- deseq.analysis.all(
     dds.list=dds.list,
     fits=distance.fits,
     cores=params$cores
   )
+  rm(distance.fits)
+  cat(paste0('Performed normalised analysis: ', dataset, '\n'))
+  gc()
   # Save normalised results and delete
   deseq.results.all(
     dds.list=norm.dds,
@@ -149,6 +158,8 @@ for (dataset in names(input.paths)) {
     cores=params$cores
   )
   rm(norm.dds)
+  cat(paste0('Written normalised files: ', dataset, '\n'))
+  gc()
   # Perform raw analysis
   raw.dds <- deseq.analysis.all(
     dds.list=dds.list,
@@ -156,6 +167,9 @@ for (dataset in names(input.paths)) {
     cores=params$cores
   )
   rm(dds.list)
+  rm(distance.fits)
+  cat(paste0('Performed raw analysis: ', dataset, '\n'))
+  gc()
   # Save raw results and delete data
   deseq.results.all(
     dds.list=raw.dds,
@@ -169,4 +183,5 @@ for (dataset in names(input.paths)) {
     cores=params$cores
   )
   rm(raw.dds)
+  gc()
 }
