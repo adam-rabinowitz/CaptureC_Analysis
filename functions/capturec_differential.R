@@ -54,6 +54,7 @@ gen.frag.counts <- function(x) {
   # Convert to integer and return
   counts <- as.matrix(counts)
   counts <- apply(counts, 2, as.integer)
+  rownames(counts) <- x$fragID
   return(counts)
 }
 
@@ -113,12 +114,14 @@ create.dds.bait <- function(bait.data, min.mean) {
   sample.data <- gen.sample.data(bait.data)
   distances <- gen.frag.distances(bait.data)
   distances <- distances[passed]
-  # Create DESeq2 object and add metadata
+  # Create DESeq2 object
   dds <- DESeq2::DESeqDataSetFromMatrix(
     countData=counts,
     colData=sample.data,
     design=~condition
   )
+  # Add metadata
+  row.names(bait.data) <- bait.data$fragID
   S4Vectors::metadata(dds)$baitdata <- bait.data[
     passed, !grepl('\\.Rep\\d+$', colnames(bait.data))]
   # Return dds object
@@ -180,8 +183,11 @@ deseq.analysis.all <- function(
 deseq.results.bait <- function(
   dds, dataset, normalisation, alt.hypothesis, contrast, alpha
 ) {
-  # Edit contrasts
+  # Edit contrasts and extract count for replicates
   alt.contrast <- gsub('-', '.', contrast)
+  replicates <- colnames(dds)[colData(dds)$condition %in% alt.contrast]
+  replicate.counts <- counts(dds, normalized=T)[,replicates]
+  replicate.means <- apply(replicate.counts, 1, mean)
   # Extract results for supplied hypothesis
   dds.results <- DESeq2::results(
     dds,
@@ -189,18 +195,25 @@ deseq.results.bait <- function(
     lfcThreshold=alt.hypothesis$lfcThreshold,
     altHypothesis=alt.hypothesis$altHypothesis,
     independentFiltering=T,
+    filter=replicate.means, ############# Required to remove low counts 
     alpha=alpha
   )
-  # Extract bait data
+  # Extract bait data and check identity
   bait.data <- metadata(dds)$baitdata
+  if (!identical(rownames(bait.data), row.names(dds.results))) {
+    stop('result order differs to bait')
+  }
   # Create output and return
   output <- data.frame(
     'dataset' = dataset,
     'normalisation' = normalisation,
     'cond1' = contrast[1],
     'cond2' = contrast[2],
-    'lfcThr' = alt.hypothesis$lfcThreshold,
-    'altHyp' = alt.hypothesis$altHypothesis,
+    'altHyp' = paste(
+      alt.hypothesis$altHypothesis,
+      alt.hypothesis$lfcThreshold,
+      sep='_'
+    ),
     'baitName' = bait.data$baitName,
     'baitID' = bait.data$baitID,
     'baitChr' = bait.data$baitChr,
@@ -212,6 +225,7 @@ deseq.results.bait <- function(
     'fragEnd' = bait.data$fragEnd,
     'fragDist' = bait.data$fragDist,
     'baseMean' = dds.results$baseMean,
+    'repMean' = replicate.means,
     'lfc' = dds.results$log2FoldChange,
     'pvalue' = dds.results$pvalue,
     'padj' = dds.results$padj
@@ -253,6 +267,12 @@ deseq.results.all <- function(
       results, out.path, sep='\t', quote=F, col.names=T, row.names=F,
       showProgress=F
     )
+    # Gzip file
+    command = paste('gzip', out.path)
+    system(command, wait=F)
+    # Clean up after loop
+    rm(results)
+    gc(verbose=F)
   }
 }
 
